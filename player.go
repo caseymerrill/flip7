@@ -24,25 +24,26 @@ const (
 )
 
 type PlayerInterface interface {
-	GetName() string
-	HasSecondChance() bool
-	GetTotalScore() int
-	GetPlayerIcon() string
 	AddCard(card *Card) error
-	UseSecondChance() *Card
-	Stay()
+	AddToTotalScore()
 	Bust()
 	CalculateRoundScore() int
-	AddToTotalScore()
-	ResetForNewRound() []*Card
-	IsActive() bool
-	HasCards() bool
-	ShowHand()
-	GetHand() []*Card
-	GetHandSummary() string
 	ChooseActionTarget(gameState *GameState, actionType ActionType) (PlayerInterface, error)
 	ChoosePositiveActionTarget(gameState *GameState, actionType ActionType) (PlayerInterface, error)
+	GetHand() []*Card
+	GetHandSummary() string
+	GetName() string
+	GetPlayerIcon() string
+	GetTotalScore() int
+	HasCards() bool
+	HasSecondChance() bool
+	IsActive() bool
 	MakeHitStayDecision(gameState *GameState) (bool, error)
+	NumberOfNumberCards() int
+	ResetForNewRound() []*Card
+	ShowHand()
+	Stay()
+	UseSecondChance() *Card
 }
 
 // Player represents a game player
@@ -117,6 +118,10 @@ func (p *BasePlayer) AddCard(card *Card) error {
 
 func (p *BasePlayer) GetHand() []*Card {
 	return slices.Concat(p.NumberCards, p.ModifierCards, p.ActionCards)
+}
+
+func (p *BasePlayer) NumberOfNumberCards() int {
+	return len(p.NumberCards)
 }
 
 // UseSecondChance uses the second chance card to avoid busting

@@ -594,6 +594,9 @@ var computerNames = []string{
 	"WOPR",
 	"Cortana",
 	"Marvin",
+	"Siri",
+	"Alexa",
+	"Jeeves",
 }
 
 func (g *Game) getComputerPlayerSetup(computerNum int) (string, HitOrStayStrategy, ActionTargetStrategy, ActionTargetStrategy, error) {
@@ -603,114 +606,135 @@ func (g *Game) getComputerPlayerSetup(computerNum int) (string, HitOrStayStrateg
 
 	g.printf("\nComputer Player %d:\n", computerNum)
 	g.println("Choose AI strategy:")
-	g.println("  1) Plays to 20")
-	g.println("  2) Plays to 25")
-	g.println("  3) Plays to 30")
-	g.println("  4) Plays to 35")
-	g.println("  5) Hit p(BUST) < 0.2")
-	g.println("  6) Hit p(BUST) < 0.25")
-	g.println("  7) Hit p(BUST) < 0.3")
-	g.println("  8) Hit p(BUST) < 0.35")
-	g.println("  9) Hit p(BUST) < 0.4")
-	g.println("  10) FLIP 7")
-	g.println("  11) Random")
-	g.println("  12) Adaptive Bust Prob (0.3)")
-	g.println("  13) Expected Value")
-	g.println("  14) Hybrid Strategy")
-	g.println("  15) Gap-Based Strategy")
-	g.println("  16) Optimal Strategy")
-	g.print("Enter choice (1-18): ")
+	g.println("  1) Plays to some score")
+	g.println("  2) Plays to against some bust probability threshold (counts cards)")
+	g.println("  3) FLIP 7 (always hits)")
+	g.println("  4) Random")
+	g.println("  5) Adaptive Bust Prob (0.3)")
+	g.println("  6) Expected Value")
+	g.println("  7) Hybrid Strategy")
+	g.println("  8) Gap-Based Strategy")
+	g.println("  9) Optimal Strategy")
+	g.println("  10) Bayesian Gain Strategy")
+	g.println("  11) Gap Aware Stragegy")
 
-	choice, err := g.getIntInput(1, 18)
+	g.print("Enter choice (1-11): ")
+
+	choice, err := g.getIntInput(1, 11)
 	if err != nil {
-		choice = 13
+		choice = 6
 	}
 
 	var strategy HitOrStayStrategy
 	var actionTargetStrategy ActionTargetStrategy
 	var positiveActionTargetStrategy ActionTargetStrategy
+	var targetScore int
+	var bustProbabilityThreshold float64
+	var gapTolerance int
+	var slackFactor int
+
+	if choice == 1 {
+		g.print("Enter Target Score: ")
+		score, err := g.getIntInput(1, 100)
+		if err != nil {
+			score = 30
+		}
+		strategy = PlayRoundTo(score)
+		targetScore = score
+	}
+
+	if choice == 2 {
+		g.print("Enter Bust Probability Threshold: ")
+		probInput, err := g.getStringInput()
+		if err != nil {
+			probInput = "0.33"
+		}
+		prob, err := strconv.ParseFloat(probInput, 64)
+		if err != nil || prob < 0.1 || prob > 0.5 {
+			prob = 0.33
+		}
+		bustProbabilityThreshold = prob
+	}
+	if choice == 11 {
+		g.print("Enter Target Score: ")
+		score, err := g.getIntInput(1, 100)
+		if err != nil {
+			score = 30
+		}
+		strategy = PlayRoundTo(score)
+		targetScore = score
+
+		g.print("Enter Gap Tolerance (e.g., 5): ")
+		gapTol, err := g.getIntInput(1, 50)
+		if err != nil {
+			gapTol = 20
+		}
+		gapTolerance = gapTol
+		g.print("Enter Slack Factor (e.g., 5): ")
+		slack, err := g.getIntInput(1, 20)
+		if err != nil {
+			slack = 5
+		}
+		slackFactor = slack
+	}
 
 	switch choice {
 	case 1:
-		name += " (20)"
-		strategy = PlayRoundTo(20)
+		name += " (" + strconv.Itoa(targetScore) + ")"
+		strategy = PlayRoundTo(targetScore)
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 2:
-		name += " (25)"
-		strategy = PlayRoundTo(25)
+		name += " p(" + fmt.Sprintf("%.2f", bustProbabilityThreshold) + ")"
+		strategy = PlayToBustProbability(bustProbabilityThreshold)
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 3:
-		name += " (30)"
-		strategy = PlayRoundTo(30)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 4:
-		name += " (35)"
-		strategy = PlayRoundTo(35)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 5:
-		name += " (p0.2)"
-		strategy = PlayToBustProbability(0.2)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 6:
-		name += " (p0.25)"
-		strategy = PlayToBustProbability(0.25)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 7:
-		name += " (p0.3)"
-		strategy = PlayToBustProbability(0.3)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 8:
-		name += " (p0.35)"
-		strategy = PlayToBustProbability(0.35)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 9:
-		name += " (p0.4)"
-		strategy = PlayToBustProbability(0.4)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 10:
 		name += " (hit)"
 		strategy = AlwaysHitStrategy
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 11:
+	case 4:
 		name += " (rand)"
 		strategy = RandomHitOrStayStrategy
 		actionTargetStrategy = TargetRandomStrategy
 		positiveActionTargetStrategy = TargetRandomStrategy
-	case 12:
+	case 5:
 		name += " (adapt0.3)"
 		strategy = AdaptiveBustProbabilityStrategy(0.3)
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 13:
+	case 6:
 		name += " (exp)"
 		strategy = ExpectedValueStrategy
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 14:
+	case 7:
 		name += " (hybrid)"
 		strategy = HybridStrategy
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 15:
+	case 8:
 		name += " (gap)"
 		strategy = GapBasedStrategy
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
-	case 16:
+	case 9:
 		name += " (opt)"
 		strategy = OptimalStrategy
 		actionTargetStrategy = TargetLeaderStrategy
 		positiveActionTargetStrategy = TargetLastPlaceStrategy
+	case 10:
+		name += " (bayes)"
+		strategy = BayesianGainStrategy
+		actionTargetStrategy = TargetLeaderStrategy
+		positiveActionTargetStrategy = TargetLastPlaceStrategy
+	case 11:
+		name += fmt.Sprintf(" (gap%d_slack%d)", gapTolerance, slackFactor)
+		strategy = GapAwareStrategy(gapTolerance, slackFactor)
+		actionTargetStrategy = TargetLeaderStrategy
+		positiveActionTargetStrategy = TargetLastPlaceStrategy
+
 	default:
 		panic("invalid choice")
 	}

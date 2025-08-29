@@ -64,10 +64,44 @@ func PlayRoundTo(n int) HitOrStayStrategy {
 	}
 }
 
+func BayesianGainStrategy(self PlayerInterface, gameState *GameState) bool {
+	bustProb := CalculateLimitedKnowledgeBustProbability(self)
+	currentScore := self.CalculateRoundScore()
+	expectedBustCost := float64(currentScore) * bustProb
+
+	// Approximate expected value of next number card
+	// \sum(i^2)/\sum(i) for i in [1..12] = 8.33
+	baseNextCardValue := 8.33
+
+	if self.NumberOfNumberCards() > 6 {
+		baseNextCardValue += 15
+	}
+
+	if hasMultiplier(self) {
+		baseNextCardValue *= 2
+	}
+
+	expectedScoreIncrease := float64(baseNextCardValue) * (1 - bustProb)
+	expectedNetGain := expectedScoreIncrease - expectedBustCost
+	return expectedNetGain > 0.0
+}
+
 func PlayToBustProbability(p float64) HitOrStayStrategy {
 	return func(self PlayerInterface, gameState *GameState) bool {
 		return CalculateBustProbability(self, gameState) < p
 	}
+}
+
+func CalculateLimitedKnowledgeBustProbability(player PlayerInterface) float64 {
+	numberCardSum := 0
+	for _, card := range player.GetHand() {
+		if card.Type == NumberCard {
+			numberCardSum += card.Value
+		}
+	}
+
+	// 978 is \sum(i) for i in [1..12]
+	return float64(numberCardSum) / float64(50)
 }
 
 // Helper functions for advanced strategies
@@ -212,6 +246,24 @@ func HybridStrategy(self PlayerInterface, gameState *GameState) bool {
 	}
 
 	return bustProb < baseBustThreshold
+}
+
+func GapAwareStrategy(TargetScore int, GapThreshold int) HitOrStayStrategy {
+	slackTarget := TargetScore - GapThreshold
+	aggressiveTarget := TargetScore - GapThreshold
+	slackTargetStrategy := PlayRoundTo(TargetScore)
+	aggressiveTargetStrategy := PlayRoundTo(aggressiveTarget)
+	normalTargetStrategy := PlayRoundTo(TargetScore)
+	return func(self PlayerInterface, gameState *GameState) bool {
+		score := self.CalculateRoundScore()
+		if score <= aggressiveTarget {
+			return aggressiveTargetStrategy(self, gameState)
+		} else if score >= slackTarget {
+			return slackTargetStrategy(self, gameState)
+		} else {
+			return normalTargetStrategy(self, gameState)
+		}
+	}
 }
 
 // GapBasedStrategy focuses on the score gap to other players
