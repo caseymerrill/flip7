@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -12,6 +13,19 @@ import (
 	"time"
 )
 
+// ComputerPlayerConfig Config structs for game_config.json
+type ComputerPlayerConfig struct {
+	Name           string `json:"name"`
+	StrategyChoice int    `json:"strategy_choice"`
+}
+
+type GameConfig struct {
+	TotalPlayers    int                    `json:"total_players"`
+	HumanPlayers    int                    `json:"human_players"`
+	HumanNames      []string               `json:"human_names"`
+	ComputerPlayers []ComputerPlayerConfig `json:"computer_players"`
+}
+
 // Game represents the main game state
 type Game struct {
 	players    []PlayerInterface
@@ -21,17 +35,56 @@ type Game struct {
 	scanner    *bufio.Scanner
 	debugMode  bool
 	silentMode bool
+	config     *GameConfig
 }
 
 // NewGame creates a new Flip 7 game instance
 func NewGame() *Game {
-	return &Game{
+	g := &Game{
 		players:   make([]PlayerInterface, 0),
 		deck:      NewDeck(),
 		round:     1,
 		scanner:   bufio.NewScanner(os.Stdin),
 		debugMode: false,
+		config:    nil,
 	}
+	g.loadConfig()
+	return g
+}
+
+// loadConfig tries to load setup from game_config.json
+func (g *Game) loadConfig() {
+	configFile := "game_config.json"
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		// Config file not found is not an error, just proceed with interactive setup
+		return
+	}
+
+	// Do not proceed if the file is empty
+	if len(data) == 0 {
+		return
+	}
+
+	var config GameConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		g.printf("Warning: Could not parse %s, proceeding with interactive setup. Error: %v\n", configFile, err)
+		return
+	}
+
+	// If total_players is 0, assume config is a placeholder and ignore it
+	if config.TotalPlayers <= 0 {
+		return
+	}
+
+	// Basic validation
+	if config.TotalPlayers != config.HumanPlayers+len(config.ComputerPlayers) {
+		g.printf("Warning: Mismatch in player counts in %s, proceeding with interactive setup.\n", configFile)
+		return
+	}
+
+	g.config = &config
+	g.printf("✅ Loaded configuration from %s\n", configFile)
 }
 
 // SetDebugMode enables or disables debug mode
@@ -86,6 +139,13 @@ func (g *Game) Run() error {
 		}
 
 		g.showScores()
+
+		// Pause for user to continue, but not in silent/simulation mode
+		if !g.silentMode {
+			g.printf("\nPress [Enter] to continue to the next round...")
+			g.scanner.Scan()
+		}
+
 		g.nextRound()
 	}
 
@@ -355,6 +415,8 @@ func (g *Game) playerHit(player PlayerInterface) error {
 	if err := player.AddCard(card); err != nil {
 		return g.handleCardAddError(player, card, err)
 	}
+	fmt.Printf("%s's hand: %v (Score: %d)\n", player.GetName(), player.GetHand(), player.CalculateRoundScore())
+	println("\n============Another Player Action============")
 
 	return nil
 }
@@ -522,6 +584,55 @@ func (g *Game) handleCardAddError(player PlayerInterface, card *Card, err error)
 
 // setupPlayers handles the initial player setup (human vs computer)
 func (g *Game) setupPlayers() error {
+	if g.config != nil && g.config.TotalPlayers > 0 {
+		return g.setupPlayersFromConfig()
+	}
+	return g.setupPlayersInteractively()
+}
+
+func (g *Game) setupPlayersFromConfig() error {
+	numHumans := g.config.HumanPlayers
+	numComputers := len(g.config.ComputerPlayers)
+
+	// Setup human players
+	for i := 0; i < numHumans; i++ {
+		var name string
+		var err error
+
+		// Try to get name from config
+		if i < len(g.config.HumanNames) && g.config.HumanNames[i] != "" {
+			name = g.config.HumanNames[i]
+		} else {
+			g.printf("Enter name for Human Player %d: ", i+1)
+			name, err = g.getStringInput()
+			if err != nil {
+				name = fmt.Sprintf("Human %d", i+1)
+			}
+		}
+
+		g.players = append(g.players, NewHumanPlayer(name, g.scanner))
+	}
+
+	// Setup computer players from config
+	for _, compConfig := range g.config.ComputerPlayers {
+		name := compConfig.Name
+		strategy, actionTarget, positiveTarget := getStrategyByChoice(compConfig.StrategyChoice, &name)
+		g.players = append(g.players, NewComputerPlayer(name, strategy, actionTarget, positiveTarget))
+		g.printf("  → Added configured AI: %s\n", name)
+	}
+
+	if numHumans == 0 {
+		g.printf("\n🎮 Starting AI-only Flip 7 with %d computer players from config!\n", numComputers)
+		// Note: AI-only simulation mode (runMultipleGames) is only available in interactive setup.
+		// Config-based setup will run a single game.
+	} else {
+		g.printf("\n🎮 Starting Flip 7 with %d humans and %d computers from config!\n", numHumans, numComputers)
+	}
+
+	return nil
+}
+
+func (g *Game) setupPlayersInteractively() error {
 	g.println("How many players total? (2-18): ")
 	numPlayers, err := g.getIntInput(2, 18)
 	if err != nil {
@@ -553,7 +664,7 @@ func (g *Game) setupPlayers() error {
 			return err
 		}
 		g.players = append(g.players, NewComputerPlayer(name, strategy, actionTargetStrategy, positiveActionTargetStrategy))
-		g.printf("  → Added: %s (%s AI)\n", name, g.players[len(g.players)-1].GetName())
+		g.printf("  → Added: %s\n", g.players[len(g.players)-1].GetName())
 	}
 
 	if numHumans == 0 {
@@ -579,27 +690,19 @@ func (g *Game) setupPlayers() error {
 
 // getComputerPlayerSetup handles setup for a single computer player
 var computerNames = []string{
-	"HAL",
-	"Data",
-	"GLaDOS",
-	"WALL-E",
-	"EVE",
-	"R2D2",
-	"C3PO",
-	"T-800",
-	"Skynet",
-	"Optimus",
-	"Megatron",
-	"Bender",
-	"WOPR",
-	"Cortana",
-	"Marvin",
+	"HAL", "Data", "GLaDOS", "WALL-E", "EVE", "R2D2", "C3PO", "T-800",
+	"Skynet", "Optimus", "Megatron", "Bender", "WOPR", "Cortana", "Marvin",
 }
 
 func (g *Game) getComputerPlayerSetup(computerNum int) (string, HitOrStayStrategy, ActionTargetStrategy, ActionTargetStrategy, error) {
-	nameIndex := rand.Intn(len(computerNames))
-	name := computerNames[nameIndex]
-	computerNames = slices.Delete(computerNames, nameIndex, nameIndex+1)
+	var name string
+	if len(computerNames) > 0 {
+		nameIndex := rand.Intn(len(computerNames))
+		name = computerNames[nameIndex]
+		computerNames = slices.Delete(computerNames, nameIndex, nameIndex+1)
+	} else {
+		name = fmt.Sprintf("Computer %d", computerNum)
+	}
 
 	g.printf("\nComputer Player %d:\n", computerNum)
 	g.println("Choose AI strategy:")
@@ -619,103 +722,80 @@ func (g *Game) getComputerPlayerSetup(computerNum int) (string, HitOrStayStrateg
 	g.println("  14) Hybrid Strategy")
 	g.println("  15) Gap-Based Strategy")
 	g.println("  16) Optimal Strategy")
-	g.print("Enter choice (1-18): ")
+	g.print("Enter choice (1-16): ")
 
-	choice, err := g.getIntInput(1, 18)
+	choice, err := g.getIntInput(1, 16)
 	if err != nil {
-		choice = 13
+		choice = 16 // Default to Optimal
 	}
 
+	strategy, actionTargetStrategy, positiveActionTargetStrategy := getStrategyByChoice(choice, &name)
+	return name, strategy, actionTargetStrategy, positiveActionTargetStrategy, nil
+}
+
+func getStrategyByChoice(choice int, name *string) (HitOrStayStrategy, ActionTargetStrategy, ActionTargetStrategy) {
 	var strategy HitOrStayStrategy
-	var actionTargetStrategy ActionTargetStrategy
-	var positiveActionTargetStrategy ActionTargetStrategy
+	var actionTargetStrategy ActionTargetStrategy = TargetLeaderStrategy
+	var positiveActionTargetStrategy ActionTargetStrategy = TargetLastPlaceStrategy
 
 	switch choice {
 	case 1:
-		name += " (20)"
+		*name += " (20)"
 		strategy = PlayRoundTo(20)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 2:
-		name += " (25)"
+		*name += " (25)"
 		strategy = PlayRoundTo(25)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 3:
-		name += " (30)"
+		*name += " (30)"
 		strategy = PlayRoundTo(30)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 4:
-		name += " (35)"
+		*name += " (35)"
 		strategy = PlayRoundTo(35)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 5:
-		name += " (p0.2)"
+		*name += " (p0.2)"
 		strategy = PlayToBustProbability(0.2)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 6:
-		name += " (p0.25)"
+		*name += " (p0.25)"
 		strategy = PlayToBustProbability(0.25)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 7:
-		name += " (p0.3)"
+		*name += " (p0.3)"
 		strategy = PlayToBustProbability(0.3)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 8:
-		name += " (p0.35)"
+		*name += " (p0.35)"
 		strategy = PlayToBustProbability(0.35)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 9:
-		name += " (p0.4)"
+		*name += " (p0.4)"
 		strategy = PlayToBustProbability(0.4)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 10:
-		name += " (hit)"
+		*name += " (hit)"
 		strategy = AlwaysHitStrategy
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 11:
-		name += " (rand)"
+		*name += " (rand)"
 		strategy = RandomHitOrStayStrategy
 		actionTargetStrategy = TargetRandomStrategy
 		positiveActionTargetStrategy = TargetRandomStrategy
 	case 12:
-		name += " (adapt0.3)"
+		*name += " (adapt0.3)"
 		strategy = AdaptiveBustProbabilityStrategy(0.3)
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 13:
-		name += " (exp)"
+		*name += " (exp)"
 		strategy = ExpectedValueStrategy
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 14:
-		name += " (hybrid)"
+		*name += " (hybrid)"
 		strategy = HybridStrategy
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 15:
-		name += " (gap)"
+		*name += " (gap)"
 		strategy = GapBasedStrategy
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	case 16:
-		name += " (opt)"
+		*name += " (opt)"
 		strategy = OptimalStrategy
-		actionTargetStrategy = TargetLeaderStrategy
-		positiveActionTargetStrategy = TargetLastPlaceStrategy
 	default:
-		panic("invalid choice")
+		// Default to Optimal Strategy for invalid choices
+		*name += " (opt)"
+		strategy = OptimalStrategy
 	}
 
-	return name, strategy, actionTargetStrategy, positiveActionTargetStrategy, nil
+	return strategy, actionTargetStrategy, positiveActionTargetStrategy
 }
 
 // buildGameState creates a GameState for AI decision making
@@ -862,16 +942,12 @@ func (g *Game) displayGameStatistics(numGames int, playerWins map[string]int, pl
 	}
 
 	// Sort by wins (descending)
-	for i := 0; i < len(stats)-1; i++ {
-		for j := i + 1; j < len(stats); j++ {
-			if stats[j].wins > stats[i].wins {
-				stats[i], stats[j] = stats[j], stats[i]
-			}
-		}
-	}
+	slices.SortFunc(stats, func(a, b playerStat) int {
+		return b.wins - a.wins
+	})
 
 	// Display results
-	g.printf("%-20s %8s %10s %12s\n", "PLAYER", "WINS", "WIN RATE", "PERFORMANCE")
+	g.printf("% -20s %8s %10s %12s\n", "PLAYER", "WINS", "WIN RATE", "PERFORMANCE")
 	g.printf(strings.Repeat("-", 60) + "\n")
 
 	for i, stat := range stats {
@@ -898,7 +974,7 @@ func (g *Game) displayGameStatistics(numGames int, playerWins map[string]int, pl
 			performance = "😔 WEAK"
 		}
 
-		g.printf("%-20s %8d %9.1f%% %12s %s\n",
+		g.printf("% -20s %8d %9.1f%% %12s %s\n",
 			stat.name, stat.wins, stat.rate, performance, medal)
 	}
 
@@ -906,8 +982,8 @@ func (g *Game) displayGameStatistics(numGames int, playerWins map[string]int, pl
 	g.printf("Total Games: %d\n", numGames)
 
 	// Additional statistics
-	winner := stats[0]
 	if len(stats) > 1 {
+		winner := stats[0]
 		runnerUp := stats[1]
 		margin := winner.rate - runnerUp.rate
 		g.printf("Victory Margin: %.1f%% (%s vs %s)\n",

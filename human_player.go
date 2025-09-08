@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/eiannone/keyboard"
 )
 
 type HumanPlayer struct {
@@ -27,9 +29,8 @@ func (p *HumanPlayer) GetPlayerIcon() string {
 	return "👤"
 }
 
-func (p *HumanPlayer) MakeHitStayDecision(gameState *GameState) (bool, error) {
-	fmt.Printf("%s's hand, %v\n", p.Name, p.GetHand())
-	fmt.Printf("🎯 %s, do you want to (H)it or (S)tay? ", p.Name)
+// makeHitStayDecisionWithScanner is the old logic, used as a fallback
+func (p *HumanPlayer) makeHitStayDecisionWithScanner() (bool, error) {
 	for {
 		if !p.scanner.Scan() {
 			return false, fmt.Errorf("failed to read input")
@@ -44,6 +45,44 @@ func (p *HumanPlayer) MakeHitStayDecision(gameState *GameState) (bool, error) {
 		}
 
 		fmt.Print("Please enter 'H' for Hit or 'S' for Stay: ")
+	}
+}
+
+func (p *HumanPlayer) MakeHitStayDecision(gameState *GameState) (bool, error) {
+	fmt.Printf("🎯 %s, your turn. ", p.Name)
+
+	if err := keyboard.Open(); err != nil {
+		fmt.Println("\nError: Could not open keyboard for single-key input. Falling back to standard text input.\nPlease type 'h' for hit or 's' for stay, then press Enter.")
+		return p.makeHitStayDecisionWithScanner()
+	}
+	// defer keyboard.Close() ensures that the keyboard is returned to its original state.
+	defer func() {
+		err := keyboard.Close()
+		if err != nil {
+			println("keyboard close error:", err)
+		}
+	}()
+
+	fmt.Println("(Press h/Enter to Hit, s/Esc to Stay)")
+
+	for {
+		char, key, err := keyboard.GetKey()
+		if err != nil {
+			fmt.Printf("\nError reading key, falling back to text input: %v\n", err)
+			return p.makeHitStayDecisionWithScanner()
+		}
+
+		// H or h or Enter for HIT
+		if key == keyboard.KeyEnter || char == 'h' || char == 'H' {
+			fmt.Println("Hit")
+			return true, nil
+		}
+
+		// S or s or Esc for STAY
+		if key == keyboard.KeyEsc || char == 's' || char == 'S' {
+			fmt.Println("Stay")
+			return false, nil
+		}
 	}
 }
 
