@@ -1,0 +1,12 @@
+{
+  "comment": "不知道可以配置哪些值时,将total_players设置为0走一遍提示流程",
+  "total_players": 2,
+  "human_players": 1,
+  "human_names": ["zim"],
+  "computer_players": [
+    {
+      "name": "T-800",
+      "strategy_choice": 16
+    }
+  ]
+}
